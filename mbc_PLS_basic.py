@@ -10,7 +10,7 @@
 import numpy   as np
 import pandas  as pd
 import sklearn as skl
-
+import random
 import matplotlib.pyplot as plt
 
 from sys import stdout
@@ -24,65 +24,133 @@ from sys import stdout
 #  - M_y     M_yy     M_yyy  : (DataFrame) target variable; cols are responses
 #  - Ncomp   opt_Nc          : (int) number of latent variables to test
 
+def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, Ncomp):
+    # The function creates a PLS model with a train data set. Then test it to
+    # create prediction (Y_pred) that can be compared with Y_test to calculate
+    # the error and accuracy
 
-def PLS_CrossVal( M_x, M_y, Ncomp, cv_split):
-    # Define PLS object with Ncomp components. Then, using scikit-learn, apply
-    # PLSRegression to get cross-validated estimates for each input data point
+    plsr = skl.cross_decomposition.PLSRegression(n_components = Ncomp)
+    plsr.fit( X_train, Y_train )
+    Y_pred = plsr.predict( X_test )
+    Y_pred = Y_pred.astype(float).flatten()
+
+    # Calculate scores for MSE and R2
+    mse = skl.metrics.mean_squared_error( Y_test, Y_pred)
+    r2  = skl.metrics.r2_score( Y_test, Y_pred)
+
+    return Y_pred, mse, r2
+
+
+
+def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
+                           RespCol, min_Resp_cat, max_Resp_cat, P_Threshold ,
+                           outLoop, inLoop, outerPropT2T, innerPropT2T):
+    # Perform a double cross validation of the PLR regression. The major steps
+    # of the algorithm are the following:
+    #
+    # At each iteration of outer loop: Create training and test sets  and then
+    # execute the inner loop using all dataset available (M_X and M_Y)
+    #
+    #   At each iteration of inner loop: Create training and test sets and then
+    #   execute the inner loop using only the oX_train and oY_train
+    #
+    #       Create PLS models for full range of number of components
+    #
+    #   Store the average MSE from the ii-th inner loop. The smallest, leftmost
+    #   MSE is the optimal number of components (opt_Ncomp) to use.
+    #   Use the opt_Ncomp to predict values for oX_test and compared with the
+    #   true values in oY_test. Calculate accuracy of modelling with opt_Ncomp
+    #   at this oo-th iteration
+    #
+    # FUNC used:
+    # --> RandomSelect_P_TrainTest
+    # --> PLS_ModelPredict
     #
     # INPUT:
-    #   - M_x      - M_y      - Ncomp
-    #   - cv_split : (obj or int) cross-validation splitting strategy
-    # OUTPUT:
-    #   - M_y_cv   : (np.array) estimated probability for predictors
-
-    funPLS = skl.cross_decomposition.PLSRegression( n_components = Ncomp )
-    M_y_cv = skl.model_selection.cross_val_predict( funPLS,  M_x,  M_y,  cv= cv_split)
-
-    return M_y_cv
-
-
-def optimise_PLS_CrossVal( M_xx, M_yy, Ncomp, test_prop, plot_MSE):
-    # Map the function "PLS_CrossVal" to test PLS with a range of number of
-    # components, going from from 1 to maximum of "Ncomp". Option plot_MSE
-    # determines whether to display the MSE and R2 plots and estimated optimal
-    # number of components
+    #  - M_X          : (pd.df) predictors, num variables only; already scaled
+    #  - M_Y          : (pd.df) responses,
+    #  - Test_Ncomp   : maximum number of components to test for each model
+    #  - uniqueID_Col : (str) column in M_Y to use to create training and test data sets
+    #  - RespCol      : (str) column in M_Y to use tas response variable in PLS-DA model
+    #  - min_Resp_cat : lowest value in RespCol
+    #  - min_Resp_cat : highest value in RespCol
+    #  - P_Threshold  : threshold at 50%, between min_Resp_cat and max_Resp_cat
+    #  - outLoop      : how many outer loops to run
+    #  - inLoop       : how many inner loops to run
+    #  - outerPropT2T : proportion of data to use as train set in outer loop
+    #  - innerPropT2T : proportion of data to use as train set in inner loop
     #
-    # INPUT:
-    #   - M_xx     - M_yy     - Ncomp
-    #   - test_prop: (int) % size of the k-fold. From this value the function
-    #                will create the k-fold groups for the test
-    #   - plot_MSE : (bool) choose to plot MSE and R2 charts
     # OUTPUT:
-    #   - mse      : mean square estimate
-    #   - r2       : coefficient of estimation R-squared
+    #  - accuracy     : (pd.df) first row the suggested best number of components
+    #                           for each outer loop iteration tested
+    #                           second row the accuracy calculated for each
+    #                           outer loop iteration tested
+    #  - comparPred   :
 
-    # Create selection function, for K-fold cross-validation with shuffle
-    values = np.array(M_xx.index.values)
-    k_fold = round(len(values) / round((len(values) * test_prop )) )
-    kf_idx = skl.model_selection.KFold(n_splits=k_fold, shuffle=True, random_state=1)
+    # Create list of components' range to iterate
+    range_comp = np.arange(1, Test_Ncomp+1)
 
-    # Perform PLS regressions for full range of N components, using k-fold
-    # sampling method kf_idx and calculate the scores
-    mse = []
-    r2  = []
-    components = np.arange(1, Ncomp)
+    # Initialize empty DataFrames to store results
+    innerMSE = pd.DataFrame( 0 , index= [ "i"+str(xx+1) for xx in range(inLoop)] ,
+                                 columns= [ "lv"+str(xx+1) for xx in range(Test_Ncomp)])
 
-    for ii in components:
-        M_yy_cv = PLS_CrossVal( M_xx, M_yy, ii, kf_idx)
-        # Calculate scores for MSE and R2
-        mse.append( skl.metrics.mean_squared_error( M_yy, M_yy_cv) )
-        r2.append(  skl.metrics.r2_score( M_yy, M_yy_cv) )
-        # Show computation progress and update status on the same line
-        #progress = 100*(ii+1)/Ncomp
-        #stdout.write("\r%d%% completed" % progress)
-        #stdout.flush()
+    outerMSE = pd.DataFrame( 0 , index= [ "o"+str(xx+1) for xx in range(outLoop)] ,
+                                 columns= [ "lv"+str(xx+1) for xx in range(Test_Ncomp)])
 
-    if plot_MSE is True:
-        print("\n")
-        plot_metrics(mse, 'MSE', 'min')
-        # plot_metrics(r2 , 'R2' , 'max')
+    accuracy = pd.DataFrame( 0 , index = ["Suggested_N_comp", "Accuracy"] ,
+                                 columns= [ "o"+str(xx+1) for xx in range(outLoop)] )
 
-    return mse, r2
+    for ooL in range(outLoop):
+        # Outer Split - in training and test sets, based on their patient ID
+        oX_train, oX_test ,oY_train, oY_test, _,_ = RandomSelect_P_TrainTest( M_X, M_Y, uniqueID_Col, outerPropT2T )
+
+        for iiL in range(inLoop):
+            # Inner Split - in training and test sets, based on their patient ID
+            iX_train, iX_test ,iY_train, iY_test, _,_ = RandomSelect_P_TrainTest( oX_train, oY_train, uniqueID_Col, innerPropT2T )
+            # Take only the response columne "RespCol"
+            iY_train = iY_train.loc[:, RespCol ]
+            iY_test  = iY_test.loc[ :, RespCol ]
+
+            # Perform PLS on full range of number of components and save MSEs
+            for cc in range_comp:
+
+                iY_pred, mse, _ = PLS_ModelPredict( iX_train, iX_test,
+                                                    iY_train, iY_test, cc)
+                innerMSE.iloc[iiL, cc-1 ] = mse
+
+            #print("Outer-loop: ", str(ooL+1), " ;    Inner-loop: ", str(iiL+1))
+            #plot_metrics( innerMSE.mean(axis=0).tolist() , 'MSE', 'min')
+
+        # Store the average MSE for each tested number of latent variables
+        outerMSE.iloc[ooL, :] = innerMSE.mean(axis=0).tolist()
+        # Find the "leftmost" minimum number of components, which is optimal to
+        # use for modelling and prediction testing
+        opt_Ncomp = np.argmin(outerMSE.iloc[ooL, :])
+        # Take only the response column "RespCol"
+        oY_train = oY_train.loc[:, RespCol ]
+        oY_test  = oY_test.loc[ :, RespCol ]
+        # Obtain the predicted scores for the model using the test sets
+        oY_pred, mse, _ = PLS_ModelPredict( oX_train, oX_test,
+                                            oY_train, oY_test, opt_Ncomp)
+
+        # Use P_Threshold to transform the oY_pred in categorical values
+        Y_pred_thres = []
+        for yn in range(len(oY_pred)):
+            if oY_pred[yn] > P_Threshold:
+                Y_pred_thres.append(max_Resp_cat)
+            elif oY_pred[yn] <= P_Threshold:
+                Y_pred_thres.append(min_Resp_cat)
+        # Assess accuracy in prediction and accuracy efficiency
+        temp_accu = [ qq == ee for qq,ee in zip( oY_test.tolist(), Y_pred_thres) ]
+        accuracy.iloc[0, ooL] = opt_Ncomp
+        accuracy.iloc[1, ooL] = sum(temp_accu) / len(temp_accu)
+        comparPred = pd.DataFrame( [oY_test.tolist(), oY_pred, Y_pred_thres, temp_accu] ).T
+        comparPred.columns = ["oY_test", "oY_pred", "Y_pred_thres", "T-F"]
+
+    return accuracy, comparPred
+
+
+
 
 
 def plot_metrics(vals, ylabel, objective):
@@ -154,6 +222,8 @@ def CrossSelect_TwoTables( M_x, M_y, select_col, categories):
 
     return redX, redY
 
+
+
 def StandardScale_FeatureTable( M_x, idxCol ):
     # Take the variables of predictors DataFrame (M_x) only: idxCol indicate
     # the column separating variables from categorical/informational data.
@@ -170,6 +240,38 @@ def StandardScale_FeatureTable( M_x, idxCol ):
     X_scaled = pd.concat( [ X_desc , X_vars_scaled], axis=1)
 
     return X_vars_scaled, X_scaled
+
+
+
+def RandomSelect_P_TrainTest( M_x, M_y, column_ID, proportion ):
+    # Create training and test sets for M_x and M_y, where all samples from one
+    # patient are either training or test. Function assume that the two matrices
+    # (M_x and M_y) are same ordered list of observations
+
+    # Create a the unique list of identifiers to use to create the two sets
+    uID_List  = np.unique( M_y[ column_ID ].values )
+
+    test_pID  = random.sample( uID_List.tolist(), round(len(uID_List)*proportion) )
+    test_idx  = np.where( M_y[column_ID].isin( test_pID ))[0].tolist()
+
+    train_pID = np.setdiff1d(uID_List, test_pID)
+    train_idx = np.where( M_y[column_ID].isin( train_pID ))[0].tolist()
+
+    X_train = M_x.iloc[ train_idx, : ]
+    X_test  = M_x.iloc[ test_idx,  : ]
+    Y_train = M_y.iloc[ train_idx, : ]
+    Y_test  = M_y.iloc[ test_idx,  : ]
+
+    return X_train, X_test ,Y_train, Y_test, train_idx, test_idx
+
+
+
+
+
+
+
+
+
 
 
 # ****************************************************************************
