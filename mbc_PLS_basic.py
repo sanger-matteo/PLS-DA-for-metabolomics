@@ -22,7 +22,7 @@ from sys import stdout
 #
 #  - M_x     M_xx     M_xxx  : (DataFrame) data to fit; cols are predictors
 #  - M_y     M_yy     M_yyy  : (DataFrame) target variable; cols are responses
-#  - Ncomp   opt_Nc          : (int) number of latent variables to test
+#  - Ncomp   Ncomp          : (int) number of latent variables to test
 
 def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, Ncomp):
     # The function creates a PLS model with a train data set. Then test it to
@@ -43,7 +43,7 @@ def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, Ncomp):
 
 
 def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
-                           RespCol, min_Resp_cat, max_Resp_cat, P_Threshold ,
+                           RespVar, min_Resp_cat, max_Resp_cat, P_Threshold ,
                            outLoop, inLoop, outerPropT2T, innerPropT2T):
     # Perform a double cross validation of the PLR regression. The major steps
     # of the algorithm are the following:
@@ -70,10 +70,10 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
     #  - M_X          : (pd.df) predictors, num variables only; already scaled
     #  - M_Y          : (pd.df) responses,
     #  - Test_Ncomp   : maximum number of components to test for each model
-    #  - uniqueID_Col : (str) column in M_Y to use to create training and test data sets
-    #  - RespCol      : (str) column in M_Y to use tas response variable in PLS-DA model
-    #  - min_Resp_cat : lowest value in RespCol
-    #  - min_Resp_cat : highest value in RespCol
+    #  - uniqueID_Col : (str) M_Y column to create training and test data sets
+    #  - RespVar      : (str) M_Y column to use as response variable PLS-DA
+    #  - min_Resp_cat : lowest value in RespVar
+    #  - min_Resp_cat : highest value in RespVar
     #  - P_Threshold  : threshold at 50%, between min_Resp_cat and max_Resp_cat
     #  - outLoop      : how many outer loops to run
     #  - inLoop       : how many inner loops to run
@@ -81,10 +81,10 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
     #  - innerPropT2T : proportion of data to use as train set in inner loop
     #
     # OUTPUT:
-    #  - accuracy     : (pd.df) first row the suggested best number of components
+    #  - accuracy     : (pd.df) 1st row - suggested best number of components
     #                           for each outer loop iteration tested
-    #                           second row the accuracy calculated for each
-    #                           outer loop iteration tested
+    #                           2ns row - accuracy calculated in each iteration
+    #                           of outer loop
     #  - comparPred   :
 
     # Create list of components' range to iterate
@@ -107,9 +107,9 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
         for iiL in range(inLoop):
             # Inner Split - in training and test sets, based on their patient ID
             iX_train, iX_test ,iY_train, iY_test, _,_ = RandomSelect_P_TrainTest( oX_train, oY_train, uniqueID_Col, innerPropT2T )
-            # Take only the response columne "RespCol"
-            iY_train = iY_train.loc[:, RespCol ]
-            iY_test  = iY_test.loc[ :, RespCol ]
+            # Take only the response columne "RespVar"
+            iY_train = iY_train.loc[:, RespVar ]
+            iY_test  = iY_test.loc[ :, RespVar ]
 
             # Perform PLS on full range of number of components and save MSEs
             for cc in range_comp:
@@ -126,9 +126,9 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
         # Find the "leftmost" minimum number of components, which is optimal to
         # use for modelling and prediction testing
         opt_Ncomp = np.argmin(outerMSE.iloc[ooL, :])
-        # Take only the response column "RespCol"
-        oY_train = oY_train.loc[:, RespCol ]
-        oY_test  = oY_test.loc[ :, RespCol ]
+        # Take only the response column "RespVar"
+        oY_train = oY_train.loc[:, RespVar ]
+        oY_test  = oY_test.loc[ :, RespVar ]
         # Obtain the predicted scores for the model using the test sets
         oY_pred, mse, _ = PLS_ModelPredict( oX_train, oX_test,
                                             oY_train, oY_test, opt_Ncomp)
@@ -148,7 +148,6 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
         comparPred.columns = ["oY_test", "oY_pred", "Y_pred_thres", "T-F"]
 
     return accuracy, comparPred
-
 
 
 
@@ -176,46 +175,49 @@ def plot_metrics(vals, ylabel, objective):
     plt.show()
 
 
-def PLS_fit_model(M_xxx, M_yyy, opt_Nc, response_variable_name):
+
+def PLS_fit_model(M_xxx, M_yyy, Ncomp, RespVar):
     # Perform PLS regression and return the transformed training sample scores
     #
     # INPUT:
-    #   - M_xxx    - M_yyy    - opt_Nc
-    #   - response_variable_name : column name used from M_yyy table
+    #   - M_xxx    - M_yyy    - Ncomp
+    #   - RespVar : column name used from M_yyy table
     # OUTPUT:
     #   - DF_PLS_scores : (DataFrame) with the latent var. scores and the
     #                     M_yyy values in the last columns
 
-    # Define PLS object with opt_Nc components. No scaling is necessary
+    # Define PLS object with Ncomp components. No scaling is necessary
     # (data was already scaled)
-    plsr = skl.cross_decomposition.PLSRegression(n_components= opt_Nc , scale=False)
+    plsr = skl.cross_decomposition.PLSRegression(n_components= Ncomp , scale=False)
 
     # Build a PLS-DA model and save the values of opt_N_comp scores in DataFrame
     # together with the YY response table
     plsr.fit( M_xxx, M_yyy)
     scores = plsr.x_scores_
-    DF_PLS_scores = pd.DataFrame(data = scores, columns= ["Score_LV_"+str(xx+1) for xx in np.arange(opt_Nc)] )
-    DF_PLS_scores[ response_variable_name ] = np.array(M_yyy)
+    DF_PLS_scores = pd.DataFrame( data = scores,
+                                  columns = ["Score_LV_"+str(xx+1) for xx in np.arange(Ncomp)] )
+    DF_PLS_scores[ RespVar ] = np.array(M_yyy)
 
     return DF_PLS_scores
 
 
-def CrossSelect_TwoTables( M_x, M_y, select_col, categories):
+
+def CrossSelect_TwoTables( M_x, M_y, RespVar, categories):
     # The input are two matricex with the same ordered list of observations:
     #  - M_x is the variable matrix
     #  - M_y is the predictors matrix
     # The function use M_y to find the index of the rows where the value(s)
-    # "categories" in column "select_col" is True
+    # "categories" in column "RespVar" is True
     #
     # INPUT:
     #   - categories :  is a list of 1+ elements
-    #   - select_col :  column name to use for selection
+    #   - RespVar :  column name to use for selection
     # OUTPUT:
     #   - redX , redY:  equivalent DataFrames with reduced number of rows
 
     idx = []
     for cc in categories:
-        idx = idx + M_y.index[M_y[select_col] == cc].tolist()
+        idx = idx + M_y.index[M_y[RespVar] == cc].tolist()
     idx.sort()
     redX = M_x.loc[idx,:]
     redY = M_y.loc[idx,:]
@@ -243,19 +245,19 @@ def StandardScale_FeatureTable( M_x, idxCol ):
 
 
 
-def RandomSelect_P_TrainTest( M_x, M_y, column_ID, proportion ):
+def RandomSelect_P_TrainTest( M_x, M_y, uID_colname, proportion ):
     # Create training and test sets for M_x and M_y, where all samples from one
     # patient are either training or test. Function assume that the two matrices
     # (M_x and M_y) are same ordered list of observations
 
     # Create a the unique list of identifiers to use to create the two sets
-    uID_List  = np.unique( M_y[ column_ID ].values )
+    uID_List  = np.unique( M_y[ uID_colname ].values )
 
     test_pID  = random.sample( uID_List.tolist(), round(len(uID_List)*proportion) )
-    test_idx  = np.where( M_y[column_ID].isin( test_pID ))[0].tolist()
+    test_idx  = np.where( M_y[uID_colname].isin( test_pID ))[0].tolist()
 
     train_pID = np.setdiff1d(uID_List, test_pID)
-    train_idx = np.where( M_y[column_ID].isin( train_pID ))[0].tolist()
+    train_idx = np.where( M_y[uID_colname].isin( train_pID ))[0].tolist()
 
     X_train = M_x.iloc[ train_idx, : ]
     X_test  = M_x.iloc[ test_idx,  : ]
@@ -263,15 +265,6 @@ def RandomSelect_P_TrainTest( M_x, M_y, column_ID, proportion ):
     Y_test  = M_y.iloc[ test_idx,  : ]
 
     return X_train, X_test ,Y_train, Y_test, train_idx, test_idx
-
-
-
-
-
-
-
-
-
 
 
 # ****************************************************************************
