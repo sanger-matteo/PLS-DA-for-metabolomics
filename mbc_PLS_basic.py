@@ -3,7 +3,10 @@
 
 # ****************************************************************************
 
-# Module contains functions to optimize and cross validate PLS
+# Module contains a collection of functions to:
+# - maniulate metabolomics datasets and tables
+# - perform, cross validate and optimize PLS
+# - plot PLS results
 
 # ****************************************************************************
 
@@ -17,17 +20,17 @@ import pandas  as pd
 #
 #  - M_X    : (DataFrame) data to fit; cols are predictors
 #  - M_Y    : (DataFrame) target variable; cols are responses
-#  - Ncomp  : (int) number of latent variables to test
+#  - nLV  : (int) number of latent variables to test
 
-def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, Ncomp):
+def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, nLV):
     # The function creates a PLS model with a train data set. Then test it to
     # create prediction (Y_pred) that can be compared with Y_test to calculate
-    # the error and accuracy
+    # the error, accuracy, specificity and selectivity
     from sklearn.cross_decomposition import PLSRegression
     from sklearn import metrics
     from sklearn import metrics
 
-    plsr = PLSRegression(n_components = Ncomp)
+    plsr = PLSRegression(n_components = nLV)
     plsr.fit( X_train, Y_train )
     Y_pred = plsr.predict( X_test )
     Y_pred = Y_pred.astype(float).flatten()
@@ -40,8 +43,8 @@ def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, Ncomp):
 
 
 
-def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
-                           RespVar, min_Resp_cat, max_Resp_cat, P_Threshold ,
+def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
+                           RespVar, Resp_class1, Resp_class2, P_Threshold ,
                            outLoop, inLoop, outerPropT2T, innerPropT2T,
                            display_plot):
     # Perform a double cross validation of the PLR regression. The major steps
@@ -54,35 +57,37 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
     # INPUT:
     #  - M_X          : (pd.df) predictors, num variables only; already scaled
     #  - M_Y          : (pd.df) responses,
-    #  - Test_Ncomp   : maximum number of components to test for each model
+    #  - Test_nLV     : maximum number of latent var. to test for each model
     #  - uniqueID_Col : (str) M_Y column to create training and test data sets
     #  - RespVar      : (str) M_Y column to use as response variable PLS-DA
-    #  - min_Resp_cat : lowest value in RespVar
-    #  - min_Resp_cat : highest value in RespVar
-    #  - P_Threshold  : threshold at 50%, between min_Resp_cat and max_Resp_cat
+    #  - Resp_class1  : lowest value in RespVar
+    #  - Resp_class2  : highest value in RespVar
+    #  - P_Threshold  : threshold at 50%, between Resp_class1 and Resp_class2
     #  - outLoop      : how many outer loops to run
     #  - inLoop       : how many inner loops to run
     #  - outerPropT2T : proportion of data to use as train set in outer loop
     #  - innerPropT2T : proportion of data to use as train set in inner loop
     #
     # OUTPUT:
-    #  - accuracy     : (pd.df) 1st row - suggested best number of components
-    #                           for each outer loop iteration tested
-    #                           2ns row - accuracy calculated in each iteration
-    #                           of outer loop
+    #  - EvalResults  : (pd.df) Save results evaluating different parameters
+    #         Best_nLV ------ Best number of latent var. found in oo-th cycle
+    #         accuracy ------ tot_N True prediction / tot_N of predictions
+    #         specificity --- N_correct class 1 / tot_N of class 1 (eg sick)
+    #         selectivity --- N_correct class 2 / tot_N of class 2 (eg healthy)
     #  - comparPred   :
 
-    # Create a range of numbers to iterate euqal to Test_Ncomp
-    range_comp = np.arange(1, Test_Ncomp+1)
+    # Create a range of numbers to iterate euqal to Test_nLV
+    range_nLV = np.arange(1, Test_nLV+1)
 
     # Initialize empty DataFrames to store results
     innerMSE = pd.DataFrame( 0 , index= [ "i"+str(xx+1) for xx in range(inLoop)] ,
-                                 columns= [ "lv"+str(xx+1) for xx in range(Test_Ncomp)])
+                                 columns= [ "lv"+str(xx+1) for xx in range(Test_nLV)])
 
     outerMSE = pd.DataFrame( 0 , index= [ "o"+str(xx+1) for xx in range(outLoop)] ,
-                                 columns= [ "lv"+str(xx+1) for xx in range(Test_Ncomp)])
+                                 columns= [ "lv"+str(xx+1) for xx in range(Test_nLV)])
 
-    accuracy = pd.DataFrame( 0 , index = ["Suggested_N_comp", "Accuracy"] ,
+
+    EvalResults = pd.DataFrame( 0 , index = ["Best_nLV", "Accuracy", "Specificity", "Selectivity"] ,
                                  columns= [ "o"+str(xx+1) for xx in range(outLoop)] )
 
     # At each iteration of either inner or outer loop create train and test sets
@@ -98,47 +103,52 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_Ncomp, uniqueID_Col,
             iY_test  = iY_test.loc[ :, RespVar ]
 
             # Create PLS models for full range of number of components
-            for cc in range_comp:
+            for cc in range_nLV:
                 iY_pred, mse, _ = PLS_ModelPredict( iX_train, iX_test,
                                                     iY_train, iY_test, cc)
                 innerMSE.iloc[iiL, cc-1 ] = mse
 
-            # --> Checkpoint Plot 1
-
-        # Store average MSE for iiL-th inner loop, average on each modeled
-        # number of components. Then, find the "leftmost" minimum MSE, which is
-        # the optimal number of components (opt_Ncomp)
+        # Store average MSE for iiL-th inner loop (mean MSE at model with N
+        # latent variables). Then, find the "leftmost" minimum MSE, which is
+        # the optimal number of latent variables (opt_nLV)
         outerMSE.iloc[ooL, :] = innerMSE.mean(axis=0).tolist()
-        opt_Ncomp = np.argmin(outerMSE.iloc[ooL, :])
+        #opt_nLV = np.argmin(outerMSE.iloc[ooL, :])
+        from scipy.signal import argrelextrema
+        y_line  = outerMSE.iloc[ooL, :].values
+        all_min = argrelextrema( y_line , np.less)[0]
+        # Handle case in which no local extrem point is found. Also, indexes
+        # start at 0, so optimal_nLV must be adjusted by +1
+        if all_min.size == 0 :            opt_nLV = len(y_line)
+        else:                             opt_nLV = all_min[0] +1
+
         # Take only the response column "RespVar"
         oY_train = oY_train.loc[:, RespVar ]
         oY_test  = oY_test.loc[ :, RespVar ]
         # Obtain the predicted scores for the model using the test sets
         oY_pred, mse, _ = PLS_ModelPredict( oX_train, oX_test,
-                                            oY_train, oY_test, opt_Ncomp)
+                                            oY_train, oY_test, opt_nLV)
         # Transform the oY_pred in categorical values using P_Threshold cutoff
         Y_pred_thres = []
         for yn in range(len(oY_pred)):
             if oY_pred[yn] > P_Threshold:
-                Y_pred_thres.append(max_Resp_cat)
+                Y_pred_thres.append(Resp_class2)
             elif oY_pred[yn] <= P_Threshold:
-                Y_pred_thres.append(min_Resp_cat)
-        #  Calculate accuracy of modelling with opt_Ncomp at this ooL-th iteration
+                Y_pred_thres.append(Resp_class1)
+        #  Calculate accuracy of modelling with opt_nLV at this ooL-th iteration
         temp_accu = [ qq == ee for qq,ee in zip( oY_test.tolist(), Y_pred_thres) ]
-        accuracy.iloc[0, ooL] = opt_Ncomp
-        accuracy.iloc[1, ooL] = sum(temp_accu) / len(temp_accu)
+        EvalResults.iloc[0, ooL] = opt_nLV
+        EvalResults.iloc[1, ooL] = sum(temp_accu) / len(temp_accu)
+        EvalResults.iloc[2, ooL] = (oY_test==Resp_class1).sum() / (oY_train==Resp_class1).sum()
+        EvalResults.iloc[3, ooL] = (oY_test==Resp_class2).sum() / (oY_train==Resp_class2).sum()
+
         comparPred = pd.DataFrame( [oY_test.tolist(), oY_pred, Y_pred_thres, temp_accu] ).T
         comparPred.columns = ["oY_test", "oY_pred", "Y_pred_thres", "T-F"]
 
-        # specificity is a ratio (N correct for class 1 / total number of class 1) - Sick
-        # selectivity is a ratio (N correct for class 2 / total number of class 2) - Healthy
-
-        # --> Checkpoint Plot 2
         if display_plot:
             print("Outer-loop: ", str(ooL+1))
             plot_metrics( outerMSE.iloc[ooL, :].tolist() , 'MSE', 'min')
 
-    return accuracy, comparPred, outerMSE, innerMSE
+    return EvalResults, comparPred, outerMSE, innerMSE
 
 
 
@@ -166,18 +176,23 @@ def plot_metrics(vals, ylabel, objective):
     # Plot all the line in the dataset vals
     for ii in range(y_Nlines):
         # Set the y_value to plot ii-th line
-        if isinstance(vals, list):
-            yValues = vals
-        else:
-            yValues = vals[:,ii]
+        if isinstance(vals, list):        yValues = vals
+        else:                             yValues = vals[:,ii]
 
         plt.plot(xticks, np.array(yValues), '-v', color='blue', mfc='blue')
 
         # Determine minimum and visualize it
+        from scipy.signal import argrelextrema
         if objective=='min':
-            idx = np.argmin(yValues)
+            all_extr = argrelextrema( np.array(yValues) , np.less)[0]
         else:
-            idx = np.argmax(yValues)
+            all_extr = argrelextrema( np.array(yValues) , np.greater)[0]
+
+        # Handle case in which no local extrem point is found. Also, indexes
+        # start at 0, so optimal_nLV must be adjusted (by -1) to plot correctly
+        if all_extr.size == 0 :       idx = len(yValues)-1
+        else:                         idx = all_extr[0]
+
         plt.plot(xticks[idx], np.array(yValues)[idx], 'P', ms=10, mfc='red')
 
     # Adjust plot parameters
@@ -191,34 +206,42 @@ def plot_metrics(vals, ylabel, objective):
 
 
 
-def PLS_fit_model(M_X, M_Y, Ncomp, RespVar):
+def PLS_fit_model(M_X, M_Y, nLV, RespVar):
     # Perform PLS regression and return the transformed training sample scores
     #
     # INPUT:
-    #   - M_X    - M_Y    - Ncomp
-    #   - RespVar : column name used from M_Y table
+    #   - M_X    - M_Y    - nLV
+    #   - RespVar   : column name used from M_Y table
     # OUTPUT:
-    #   - DF_PLS_scores : (DataFrame) with the latent var. scores and the
-    #                     M_Y values in the last columns
+    #   - DF_scores : (DataFrame) with the latent var. scores
+    #   - DF_loads  : (DataFrame) with the latent var. loadings
 
-    # Define PLS object with Ncomp components. No scaling is necessary
+    # Define PLS object with nLV components. No scaling is necessary
     # (data was already scaled)
     from sklearn.cross_decomposition import PLSRegression
-    plsr = PLSRegression(n_components= Ncomp , scale=False)
-
-    # Build a PLS-DA model and save the values of opt_N_comp scores in DataFrame
-    # together with the YY response table
+    plsr = PLSRegression(n_components= nLV , scale=False)
     plsr.fit( M_X, M_Y)
-    scores = plsr.x_scores_
-    DF_PLS_scores = pd.DataFrame( data = scores,
-                                  columns = ["Score_LV_"+str(xx+1) for xx in np.arange(Ncomp)] )
-    DF_PLS_scores[ RespVar ] = np.array(M_Y)
 
-    return DF_PLS_scores
+    # Store the LV' scores and loadings in DataFrames
+    DF_X_scores = pd.DataFrame( data = plsr.x_scores_ ,
+                                columns = ["Score_X_LV_"+str(xx+1) for xx in np.arange(nLV)] )
+
+    DF_Y_scores = pd.DataFrame( data = plsr.y_scores_ ,
+                                columns = ["Score_Y_LV_"+str(xx+1) for xx in np.arange(nLV)] )
+
+    # For X loadings change the row indexes to the measured variables names
+    DF_X_loads = pd.DataFrame( data = plsr.x_loadings_ ,
+                               columns = ["Load_X_LV_"+str(xx+1)  for xx in np.arange(nLV)] )
+    DF_X_loads = DF_X_loads.set_axis( M_X.columns.values.tolist() , axis='index')
+
+    DF_Y_loads = pd.DataFrame( data = plsr.y_loadings_ ,
+                               columns = ["Load_Y_LV_"+str(xx+1)  for xx in np.arange(nLV)] )
+
+    return DF_X_scores, DF_Y_scores, DF_X_loads, DF_Y_loads
 
 
 
-def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories):
+def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories, transf_01):
     # The input are two matricex with the same ordered list of observations:
     #  - M_X is the variable matrix
     #  - M_Y is the predictors matrix
@@ -226,8 +249,11 @@ def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories):
     # "categories" in column "RespVar" is True
     #
     # INPUT:
-    #   - categories :  is a list of 1+ elements
-    #   - RespVar :  column name to use for selection
+    #   - RespVar    : column name to use for selection
+    #   - categories : is a list of 1+ elements
+    #   - transf_01  : if there are only two categories, we can transform them
+    #                  into simple binary 0-1 choise (0=min , 1=max)
+    #
     # OUTPUT:
     #   - redX , redY:  equivalent DataFrames with reduced number of rows
 
@@ -237,6 +263,15 @@ def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories):
     idx.sort()
     redX = M_X.loc[idx,:]
     redY = M_Y.loc[idx,:]
+
+    #  if there are only two categories, convert into binary 0-1 data
+    if transf_01 == True:
+        if len(categories) == 2:
+            temp_aa = np.zeros(len(redY[RespVar]), dtype=int)
+            temp_aa[redY[RespVar]== categories[-1]] = 1
+            redY[RespVar] = temp_aa
+        else :
+            print(" --- WARNING --- \n Cannot transform response to binary when there are more than 2 categories")
 
     return redX, redY
 
