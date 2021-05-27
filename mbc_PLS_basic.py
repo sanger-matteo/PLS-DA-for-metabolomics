@@ -138,7 +138,7 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
         temp_accu = [ qq == ee for qq,ee in zip( oY_test.tolist(), Y_pred_thres) ]
         EvalResults.iloc[0, ooL] = opt_nLV
         EvalResults.iloc[1, ooL] = sum(temp_accu) / len(temp_accu)
-        # Find T/F Positive and T/F Negative to calculate Specificity and Sensitivity
+        # Find T/F Positive and T/F Negative to calc. Specificity, Sensitivity
         # True Negat.      True Posit.      False Negat.      False Posit.
         TN = 0;            TP = 0;          FN = 0;           FP = 0;
         for ii in range(len(oY_test)):
