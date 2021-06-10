@@ -146,8 +146,13 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
             elif oY_test.tolist()[ii]==1 and Y_pred_thres[ii]==1 :      TP +=1
             elif oY_test.tolist()[ii]==1 and Y_pred_thres[ii]==0 :      FN +=1
             elif oY_test.tolist()[ii]==0 and Y_pred_thres[ii]==1 :      FP +=1
-        EvalResults.iloc[2, ooL] = FP / (FP+TN)     # Specificisty
-        EvalResults.iloc[3, ooL] = TP / (TP+FN)     # Sensitivity
+
+        # If numbers are low, then the values of FP/FN/TP/TN are zero. Then,
+        # selectivity/specificity cannot be calculated (err: division by zero)
+        if (FP+TN) == 0:     EvalResults.iloc[2, ooL] = 0
+        else:                EvalResults.iloc[2, ooL] = FP / (FP+TN)     # Specificity
+        if (TP+FN) == 0:     EvalResults.iloc[3, ooL] = 0
+        else:                EvalResults.iloc[3, ooL] = TP / (TP+FN)     # Sensitivity
 
         comparPred = pd.DataFrame( [oY_test.tolist(), oY_pred, Y_pred_thres, temp_accu] ).T
         comparPred.columns = ["oY_test", "oY_pred", "Y_pred_thres", "T-F"]
