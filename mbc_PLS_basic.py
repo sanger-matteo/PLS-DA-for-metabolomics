@@ -25,7 +25,7 @@ import pandas  as pd
 def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, nLV):
     # The function creates a PLS model with a train data set. Then test it to
     # create prediction (Y_pred) that can be compared with Y_test to calculate
-    # the error, accuracy, specificity and selectivity
+    # the error, accuracy, specificity and Sensitivity
     from sklearn.cross_decomposition import PLSRegression
     from sklearn import metrics
     from sklearn import metrics
@@ -72,7 +72,7 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
     #  - EvalResults  : (pd.df) Save results evaluating different parameters
     #         Best_nLV ------ Best number of latent var. found in oo-th cycle
     #         accuracy ------ tot_N True prediction / tot_N of predictions
-    #         specificity --- FalsPos / (FalsPos+TrueNeg)    (i.e. test healthy)
+    #         specificity --- TrueNeg / (FalsPos+TrueNeg)    (i.e. test healthy)
     #         sensitivity --- TruePos / (TruePos+FalsNeg)    (i.e. test sick)
     #  - comparPred   :
 
@@ -87,11 +87,13 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
                                  columns= [ "lv"+str(xx+1) for xx in range(Test_nLV)])
 
 
-    EvalResults = pd.DataFrame( 0 , index = ["Best_nLV", "Accuracy", "Specificity", "Selectivity"] ,
+    EvalResults = pd.DataFrame( 0 , index = ["Best_nLV", "Accuracy", "Specificity", "Sensitivity"] ,
                                  columns= [ "o"+str(xx+1) for xx in range(outLoop)] )
 
     # At each iteration of either inner or outer loop create train and test sets
     for ooL in range(outLoop):
+        print("Iteration:   : "+str(ooL+1)+" of "+str(outLoop), sep=' ', end='\r', flush=True)
+
         # Split into "outer" training and test sets, based on uniqueID_Col
         oX_train, oX_test ,oY_train, oY_test, _,_ = RandomSelect_P_TrainTest( M_X, M_Y, uniqueID_Col, outerPropT2T )
 
@@ -134,10 +136,7 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
                 Y_pred_thres.append(Resp_class2)
             elif oY_pred[yn] <= P_Threshold:
                 Y_pred_thres.append(Resp_class1)
-        # Calculate accuracy of modelling with opt_nLV at this ooL-th iteration
-        temp_accu = [ qq == ee for qq,ee in zip( oY_test.tolist(), Y_pred_thres) ]
-        EvalResults.iloc[0, ooL] = opt_nLV
-        EvalResults.iloc[1, ooL] = sum(temp_accu) / len(temp_accu)
+
         # Find T/F Positive and T/F Negative to calc. Specificity, Sensitivity
         # True Negat.      True Posit.      False Negat.      False Posit.
         TN = 0;            TP = 0;          FN = 0;           FP = 0;
@@ -146,13 +145,19 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
             elif oY_test.tolist()[ii]==1 and Y_pred_thres[ii]==1 :      TP +=1
             elif oY_test.tolist()[ii]==1 and Y_pred_thres[ii]==0 :      FN +=1
             elif oY_test.tolist()[ii]==0 and Y_pred_thres[ii]==1 :      FP +=1
+        # Calculate accuracy of modelling with opt_nLV at this ooL-th iteration
+        temp_accu = [ qq == ee for qq,ee in zip( oY_test.tolist(), Y_pred_thres) ]
+        EvalResults.iloc[0, ooL] = opt_nLV
+        EvalResults.iloc[1, ooL] = (TP+TN) / (TP+TN+FP+FN)
+        # Alternatively, ratio of the True prediction to all predictions:
+        # EvalResults.iloc[1, ooL] = sum(temp_accu) / len(temp_accu)
 
         # If numbers are low, then the values of FP/FN/TP/TN are zero. Then,
-        # selectivity/specificity cannot be calculated (err: division by zero)
+        # ensitivity/specificity cannot be calculated (err: division by zero)
         if (FP+TN) == 0:     EvalResults.iloc[2, ooL] = 0
-        else:                EvalResults.iloc[2, ooL] = FP / (FP+TN)     # Specificity
+        else:                EvalResults.iloc[2, ooL] = TN / (FP+TN)     # Specificity
         if (TP+FN) == 0:     EvalResults.iloc[3, ooL] = 0
-        else:                EvalResults.iloc[3, ooL] = TP / (TP+FN)     # Sensitivity
+        else:                EvalResults.iloc[3, ooL] = TP / (FN+TP)     # Sensitivity
 
         comparPred = pd.DataFrame( [oY_test.tolist(), oY_pred, Y_pred_thres, temp_accu] ).T
         comparPred.columns = ["oY_test", "oY_pred", "Y_pred_thres", "T-F"]
