@@ -129,24 +129,10 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
         # Obtain the predicted scores for the model using the test sets
         oY_pred, mse, _ = PLS_ModelPredict( oX_train, oX_test,
                                             oY_train, oY_test, opt_nLV)
-        # Transform the oY_pred in categorical values using P_Threshold cutoff
-        Y_pred_thres = []
-        for yn in range(len(oY_pred)):
-            if oY_pred[yn] > P_Threshold:
-                Y_pred_thres.append(Resp_class2)
-            elif oY_pred[yn] <= P_Threshold:
-                Y_pred_thres.append(Resp_class1)
 
-        # Find T/F Positive and T/F Negative to calc. Specificity, Sensitivity
-        # True Negat.      True Posit.      False Negat.      False Posit.
-        TN = 0;            TP = 0;          FN = 0;           FP = 0;
-        for ii in range(len(oY_test)):
-            if   oY_test.tolist()[ii]==0 and Y_pred_thres[ii]==0 :      TN +=1
-            elif oY_test.tolist()[ii]==1 and Y_pred_thres[ii]==1 :      TP +=1
-            elif oY_test.tolist()[ii]==1 and Y_pred_thres[ii]==0 :      FN +=1
-            elif oY_test.tolist()[ii]==0 and Y_pred_thres[ii]==1 :      FP +=1
-        # Calculate accuracy of modelling with opt_nLV at this ooL-th iteration
-        temp_accu = [ qq == ee for qq,ee in zip( oY_test.tolist(), Y_pred_thres) ]
+        comparPred, TN, TP, FN, FP = binary_classification( oY_test.tolist(), oY_pred,
+                                       P_Threshold , Resp_class1, Resp_class2 )
+
         EvalResults.iloc[0, ooL] = opt_nLV
         EvalResults.iloc[1, ooL] = (TP+TN) / (TP+TN+FP+FN)
         # Alternatively, ratio of the True prediction to all predictions:
@@ -159,49 +145,94 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
         if (TP+FN) == 0:     EvalResults.iloc[3, ooL] = 0
         else:                EvalResults.iloc[3, ooL] = TP / (FN+TP)     # Sensitivity
 
-        comparPred = pd.DataFrame( [oY_test.tolist(), oY_pred, Y_pred_thres, temp_accu] ).T
-        comparPred.columns = ["oY_test", "oY_pred", "Y_pred_thres", "T-F"]
+        #comparPred = pd.DataFrame( [oY_test.tolist(), oY_pred, Y_pred_thres, temp_accu] ).T
+        #comparPred.columns = ["oY_test", "oY_pred", "Y_pred_thres", "T-F"]
 
         if display_plot:
             print("Outer-loop: ", str(ooL+1))
-            plot_metrics( outerMSE.iloc[ooL, :].tolist() , 'MSE', 'min')
+            plot_metrics( outerMSE.iloc[ooL, :].T.values() , 'MSE', 'min')
 
     return EvalResults, comparPred, outerMSE, innerMSE
 
 
 
+def binary_classification( Y_measured, Y_predicted, thresVal, Val_Low, Val_High ):
+    # Confront a set of measured events/conditions (Y_measured), against
+    # a set of predicted events/conditions (Y_predicted)
+    # INPUT:
+    # - Y_measured         = experiments or clinical record of events
+    # - Y_predicted        = classification predicted by (PLS) model
+    # - thresVal           = 50% vallue for threshold classification
+    # - Val_Low & Val_High = lowest and highest categories in Y
+    #
+    # OUTPUT:
+    # - comparPred         =  DataFrame with the classification results
+    # - TN, TP, FN, FP     = numbers for the T/F Positive and T/F Negative
 
-def plot_metrics(vals, ylabel, objective):
+    # Transform the Y_predicted in categorical values using thresVal cutoff
+    threshold_Y = []
+    for yn in range(len(Y_predicted)):
+        if Y_predicted[yn] > thresVal:
+            threshold_Y.append( Val_High )
+        elif Y_predicted[yn] <= thresVal:
+            threshold_Y.append( Val_Low )
+
+    # Find T/F Positive and T/F Negative to calc. Specificity, Sensitivity
+    # True Negat.      True Posit.      False Negat.      False Posit.
+    TN = 0;            TP = 0;          FN = 0;           FP = 0;
+    for ii in range(len(Y_measured)):
+        if   Y_measured[ii]==0 and threshold_Y[ii]==0 :      TN +=1
+        elif Y_measured[ii]==1 and threshold_Y[ii]==1 :      TP +=1
+        elif Y_measured[ii]==1 and threshold_Y[ii]==0 :      FN +=1
+        elif Y_measured[ii]==0 and threshold_Y[ii]==1 :      FP +=1
+    # Calculate accuracy of modelling with opt_nLV at this ooL-th iteration
+    TF_predict = [ qq == ee for qq,ee in zip( Y_measured, threshold_Y) ]
+
+    comparPred = pd.DataFrame( [Y_measured, Y_predicted, threshold_Y, TF_predict] ).T
+    comparPred.columns = ["Y_measure", "Y_predict", "Y_thres", "T-F"]
+
+    return comparPred, TN, TP, FN, FP
+
+
+def plot_metrics(vals, ylabel, objective, do_mean):
     # Function to plot an np.array "vals" (either MSE or R2 from cross-valid.
     # of PLS) and display the min or max value with a cross
-    # vals      = can be a np.array or a single list. If it is np.array, each
-    #             column is an individual line to plot on sequential x positions
+    # vals      = must be an np.array, each column is an individual line
+    #             to plot on sequential x positions
     # ylabel    = (str) the name of the plotted y-values (e.g. MSE or R2)
     # objective = (str) highlight minimum or maximum data point ("min" or "max")
+    # do_mean   = (T/F) make a mean of the table_data and plot with error-bar
 
     import matplotlib.pyplot as plt
 
-    if isinstance(vals, list):
-        x_Npoints = len(vals)
-        y_Nlines  = 1
-    else:
-        x_Npoints = vals.shape[0]
-        y_Nlines  = vals.shape[1]
+    x_Npoints = vals.shape[0]
+    y_Nlines  = vals.shape[1]
 
     fig, ax = plt.subplots(figsize=(8, 3))
-    xticks = np.arange( 1 , x_Npoints+1)
+    xticks  = np.arange( 1 , x_Npoints+1)
 
     # Plot all the line in the dataset vals
     for ii in range(y_Nlines):
         # Set the y_value to plot ii-th line
-        if isinstance(vals, list):        yValues = vals
-        else:                             yValues = vals[:,ii]
+        if do_mean:
+            yValues     = vals.mean(axis=1)
+            std_yValues = vals.std(axis=1)
+            plt.plot( xticks, np.array(yValues), '-.', color='blue', mfc='blue')
 
-        plt.plot(xticks, np.array(yValues), '-v', color='blue', mfc='blue')
+            plt.fill_between(xticks, np.array(yValues) - std_yValues,
+                                     np.array(yValues) + std_yValues,
+                                     color='lightgray', alpha=0.1)
+            plt.title('Mean Error in PLS models')
+
+        else:
+            yValues = vals[:,ii]
+            plt.plot( xticks, np.array(yValues), '-.', color='blue', mfc='blue')
+            plt.title('Error in PLS models')
+
 
         # Determine minimum and visualize it
         from scipy.signal import argrelextrema
-        if objective=='min':
+        if objective == 'min':
             all_extr = argrelextrema( np.array(yValues) , np.less)[0]
         else:
             all_extr = argrelextrema( np.array(yValues) , np.greater)[0]
@@ -218,7 +249,6 @@ def plot_metrics(vals, ylabel, objective):
     ax.set_ylabel( ylabel )
     ax.set_xticks( xticks )
     plt.grid(color = "grey", linestyle='--')
-    plt.title('Error in PLS models')
 
     plt.show()
 
