@@ -10,8 +10,8 @@
 
 # ****************************************************************************
 
-import numpy   as np
-import pandas  as pd
+import numpy  as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 # ****************************************************************************
@@ -93,7 +93,7 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
 
         # Split into "outer" training and test sets, based on uniqueID_Col
         oX_train, oX_test ,oY_train, oY_test, _,_ = RandomSelect_P_TrainTest( M_X, M_Y, uniqueID_Col, outerPropT2T )
-
+        '''
         for iiL in range(inLoop):
             # Split outer Train into "inner" training and test sets, based on column uniqueID_Col
             iX_train, iX_test ,iY_train, iY_test, _,_ = RandomSelect_P_TrainTest( oX_train, oY_train, uniqueID_Col, innerPropT2T )
@@ -102,6 +102,19 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
             iY_test  = iY_test.loc[ :, RespVar ]
 
             for nnLV in range_nLV:         # Create PLS models all range of number of LV
+                iY_pred, tempMetric = PLS_ModelPredict( iX_train, iX_test, iY_train, iY_test,
+                                                        nnLV, P50_thrVal , RespVal_0, RespVal_1)
+                ACCU = tempMetric[0]
+                innerCAL.iloc[ iiL, nnLV-1 ] = ACCU
+        '''
+        for nnLV in range_nLV:         # Create PLS models all range of number of LV
+            for iiL in range(inLoop):
+                # Split outer Train into "inner" training and test sets, based on column uniqueID_Col
+                iX_train, iX_test ,iY_train, iY_test, _,_ = RandomSelect_P_TrainTest( oX_train, oY_train, uniqueID_Col, innerPropT2T )
+                # Take only the response column "RespVar"
+                iY_train = iY_train.loc[:, RespVar ]
+                iY_test  = iY_test.loc[ :, RespVar ]
+
                 iY_pred, tempMetric = PLS_ModelPredict( iX_train, iX_test, iY_train, iY_test,
                                                         nnLV, P50_thrVal , RespVal_0, RespVal_1)
                 ACCU = tempMetric[0]
@@ -227,11 +240,10 @@ def plot_metrics(vals, ylabel, objective, do_mean):
         else:
             yValues = vals[:,ii]
             plt.title('Error in PLS models')
-            plt.plot( xticks, np.array(yValues), '-.', color='blue', mfc='blue')
+            plt.plot( xticks, np.array(yValues), '--', color='blue', mfc='blue')
 
         # Determine minimum and visualize it
         if objective == 'min':
-            #all_extr = argrelextrema( np.array(yValues) , np.less)[0]
             idx = np.argmin( np.array(yValues))
         else:
             idx = np.argmax( np.array(yValues))
