@@ -4,7 +4,7 @@
 # ****************************************************************************
 
 # Module contains a collection of functions to:
-# - maniulate metabolomics datasets and tables
+# - manipulate metabolomics datasets and tables
 # - perform, cross validate and optimize PLS
 # - plot PLS results
 
@@ -12,20 +12,26 @@
 
 import numpy   as np
 import pandas  as pd
+import matplotlib.pyplot as plt
 
 # ****************************************************************************
 
 # COMMON variables: local function variables (NOT global) that are very
 # similar in use and content, thus we use similar names
 #
-#  - M_X    : (DataFrame) data to fit; cols are predictors
-#  - M_Y    : (DataFrame) target variable; cols are responses
-#  - nLV  : (int) number of latent variables to test
+# - M_X        : (DataFrame) data to fit; cols are predictors
+# - M_Y        : (DataFrame) target variable; cols are responses
+# - nLV        : (int) number of latent variables to test
+# - RespVar    : (str) M_Y column to use as response variable PLS-DA
+# - RespVal_0  : lowest and highest categories in Y response variable
+# - RespVal_1
+# - P50_thrVal : threshold value (50%) to use to assign predictions to either
+#                RespVal_0 or RespVal_1
 
-def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, nLV):
-    # The function creates a PLS model with a train data set. Then test it to
-    # create prediction (Y_pred) that can be compared with Y_test to calculate
-    # the error, accuracy, specificity and Sensitivity
+
+def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, nLV, P50_thrVal, RespVal_0, RespVal_1):
+    # The function creates a PLS model with a train data set. Then use test to
+    # create prediction (Y_pred). Finally performance metrics, MSE and accuracy
     from sklearn.cross_decomposition import PLSRegression
     from sklearn import metrics
     from sklearn import metrics
@@ -34,150 +40,136 @@ def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, nLV):
     plsr.fit( X_train, Y_train )
     Y_pred = plsr.predict( X_test )
     Y_pred = Y_pred.astype(float).flatten()
+    # Calculate performance metrics
+    _, temp_EvalRes = binary_classification( Y_test.tolist(), Y_pred, P50_thrVal
+                                             , RespVal_0, RespVal_1 )
+    accu = temp_EvalRes.iloc[0,0]
+    mse  = metrics.mean_squared_error( Y_test, Y_pred)
 
-    # Calculate scores for MSE and R2
-    mse = metrics.mean_squared_error( Y_test, Y_pred)
-    r2  = metrics.r2_score( Y_test, Y_pred)
-
-    return Y_pred, mse, r2
+    perfo_metrics = [ accu , mse ]
+    return Y_pred, perfo_metrics
 
 
 
 def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
-                           RespVar, Resp_class1, Resp_class2, P_Threshold ,
+                           RespVar, RespVal_0, RespVal_1, P50_thrVal ,
                            outLoop, inLoop, outerPropT2T, innerPropT2T,
                            display_plot):
-    # Perform a double cross validation of the PLR regression. The major steps
-    # of the algorithm are the following:
+    # Execute a double cross validation for PLR regression.
     #
-    # FUNC used:
-    # --> RandomSelect_P_TrainTest
-    # --> PLS_ModelPredict
+    # FUNC used:   > RandomSelect_P_TrainTest    > PLS_ModelPredict
     #
     # INPUT:
     #  - M_X          : (pd.df) predictors, num variables only; already scaled
     #  - M_Y          : (pd.df) responses,
     #  - Test_nLV     : maximum number of latent var. to test for each model
     #  - uniqueID_Col : (str) M_Y column to create training and test data sets
-    #  - RespVar      : (str) M_Y column to use as response variable PLS-DA
-    #  - Resp_class1  : lowest value in RespVar
-    #  - Resp_class2  : highest value in RespVar
-    #  - P_Threshold  : threshold at 50%, between Resp_class1 and Resp_class2
     #  - outLoop      : how many outer loops to run
     #  - inLoop       : how many inner loops to run
     #  - outerPropT2T : proportion of data to use as train set in outer loop
     #  - innerPropT2T : proportion of data to use as train set in inner loop
     #
     # OUTPUT:
-    #  - EvalResults  : (pd.df) Save results evaluating different parameters
-    #         Best_nLV ------ Best number of latent var. found in oo-th cycle
-    #         accuracy ------ tot_N True prediction / tot_N of predictions
-    #         specificity --- TrueNeg / (FalsPos+TrueNeg)    (i.e. test healthy)
-    #         sensitivity --- TruePos / (TruePos+FalsNeg)    (i.e. test sick)
-    #  - comparPred   :
-
-    # Create a range of numbers to iterate euqal to Test_nLV
-    range_nLV = np.arange(1, Test_nLV+1)
+    #  - PerfoMetric  : (pd.df) Performance metrics:
+    #                 (0) accuracy (1) specificity (2) sensitivity (3) Best_nLV
+    #  - comparPred   : test, train and prediction response variable used for
+    #                   last (!) outer loop
+    #                   (we need to implement MultiIndex to keep them all)
 
     # Initialize empty DataFrames to store results
-    innerMSE = pd.DataFrame( 0 , index= [ "i"+str(xx+1) for xx in range(inLoop)] ,
-                                 columns= [ "lv"+str(xx+1) for xx in range(Test_nLV)])
-
-    outerMSE = pd.DataFrame( 0 , index= [ "o"+str(xx+1) for xx in range(outLoop)] ,
-                                 columns= [ "lv"+str(xx+1) for xx in range(Test_nLV)])
-
-
-    EvalResults = pd.DataFrame( 0 , index = ["Best_nLV", "Accuracy", "Specificity", "Sensitivity"] ,
-                                 columns= [ "o"+str(xx+1) for xx in range(outLoop)] )
+    totalCAL = pd.DataFrame( [] )
+    innerCAL = pd.DataFrame( 0, index   = [ "i"+str(xx+1) for xx in range(inLoop)] ,
+                                columns = [ "lv"+str(xx+1) for xx in range(Test_nLV)])
+    outerCAL = pd.DataFrame( 0, index   = [ "o"+str(xx+1) for xx in range(outLoop)] ,
+                                columns = [ "lv"+str(xx+1) for xx in range(Test_nLV)])
+    PerfoMetric = pd.DataFrame(0, index = ["Accuracy", "Specificity", "Sensitivity", "Best_nLV"] ,
+                                columns = [ "o"+str(xx+1) for xx in range(outLoop)] )
+    range_nLV = np.arange(1, Test_nLV+1)     # range of LV to iterate through
 
     # At each iteration of either inner or outer loop create train and test sets
     for ooL in range(outLoop):
+        # Display inline text for the progression of cross-validation
         print("Iteration:   : "+str(ooL+1)+" of "+str(outLoop), sep=' ', end='\r', flush=True)
 
         # Split into "outer" training and test sets, based on uniqueID_Col
         oX_train, oX_test ,oY_train, oY_test, _,_ = RandomSelect_P_TrainTest( M_X, M_Y, uniqueID_Col, outerPropT2T )
 
         for iiL in range(inLoop):
-            # Split into "inner" training and test sets, based on uniqueID_Col
+            # Split outer Train into "inner" training and test sets, based on column uniqueID_Col
             iX_train, iX_test ,iY_train, iY_test, _,_ = RandomSelect_P_TrainTest( oX_train, oY_train, uniqueID_Col, innerPropT2T )
             # Take only the response column "RespVar"
             iY_train = iY_train.loc[:, RespVar ]
             iY_test  = iY_test.loc[ :, RespVar ]
 
-            # Create PLS models for full range of number of components
-            for cc in range_nLV:
-                iY_pred, mse, _ = PLS_ModelPredict( iX_train, iX_test,
-                                                    iY_train, iY_test, cc)
-                innerMSE.iloc[iiL, cc-1 ] = mse
+            for nnLV in range_nLV:         # Create PLS models all range of number of LV
+                iY_pred, tempMetric = PLS_ModelPredict( iX_train, iX_test, iY_train, iY_test,
+                                                        nnLV, P50_thrVal , RespVal_0, RespVal_1)
+                ACCU = tempMetric[0]
+                innerCAL.iloc[ iiL, nnLV-1 ] = ACCU
 
-        # Store average MSE for iiL-th inner loop (mean MSE at model with N
-        # latent variables). Then, find the "leftmost" minimum MSE, which is
-        # the optimal number of latent variables (opt_nLV)
-        outerMSE.iloc[ooL, :] = innerMSE.mean(axis=0).tolist()
-        #opt_nLV = np.argmin(outerMSE.iloc[ooL, :])
-        from scipy.signal import argrelextrema
-        y_line  = outerMSE.iloc[ooL, :].values
-        all_min = argrelextrema( y_line , np.less)[0]
-        # Handle case in which no local extrem point is found. Also, indexes
-        # start at 0, so optimal_nLV must be adjusted by +1
-        if all_min.size == 0 :            opt_nLV = len(y_line)
-        else:                             opt_nLV = all_min[0] +1
+        # totalCAL stores all and every (inner loop) model created
+        # innerCAL.index = [ "i_"+str(ooL+1)+"_"+str(xx+1) for xx in range(innerCAL.shape[0])]
+        totalCAL = pd.concat( [totalCAL, innerCAL], axis=0, join="outer", ignore_index=True)
+        # OuterCal stores mean ACCU modeled with each N number latent variables.
+        outerCAL.iloc[ooL, :] = innerCAL.mean(axis=0).tolist()
+        # Find "leftmost" max ACCU, which is the optimal number of LV (opt_nLV)
+        opt_nLV = np.argmax(outerCAL.iloc[ooL, :]) +1
 
         # Take only the response column "RespVar"
         oY_train = oY_train.loc[:, RespVar ]
         oY_test  = oY_test.loc[ :, RespVar ]
         # Obtain the predicted scores for the model using the test sets
-        oY_pred, mse, _ = PLS_ModelPredict( oX_train, oX_test,
-                                            oY_train, oY_test, opt_nLV)
+        oY_pred, _ = PLS_ModelPredict( oX_train, oX_test, oY_train, oY_test,
+                                       opt_nLV, P50_thrVal , RespVal_0, RespVal_1)
+        comparPred, temp_EvalRes = binary_classification( oY_test.tolist(), oY_pred,
+                                            P50_thrVal , RespVal_0, RespVal_1 )
 
-        comparPred, TN, TP, FN, FP = binary_classification( oY_test.tolist(), oY_pred,
-                                       P_Threshold , Resp_class1, Resp_class2 )
+        PerfoMetric.iloc[:, ooL] = temp_EvalRes.values
+        PerfoMetric.iloc[3, ooL] = opt_nLV
 
-        EvalResults.iloc[0, ooL] = opt_nLV
-        EvalResults.iloc[1, ooL] = (TP+TN) / (TP+TN+FP+FN)
-        # Alternatively, ratio of the True prediction to all predictions:
-        # EvalResults.iloc[1, ooL] = sum(temp_accu) / len(temp_accu)
+    # Take the most common opt_nLV as overall optimal number of LV
+    optimal_nLV = PerfoMetric.iloc[-1,:].mode()[0]
 
-        # If numbers are low, then the values of FP/FN/TP/TN are zero. Then,
-        # ensitivity/specificity cannot be calculated (err: division by zero)
-        if (FP+TN) == 0:     EvalResults.iloc[2, ooL] = 0
-        else:                EvalResults.iloc[2, ooL] = TN / (FP+TN)     # Specificity
-        if (TP+FN) == 0:     EvalResults.iloc[3, ooL] = 0
-        else:                EvalResults.iloc[3, ooL] = TP / (FN+TP)     # Sensitivity
+    if display_plot:
+        bins = range(Test_nLV)
+        data = PerfoMetric.iloc[-1,:]
+        def bins_labels(bins, **kwargs):
+            bin_w = 1
+            plt.xticks(np.arange(min(bins)+bin_w/2, max(bins), bin_w), bins, **kwargs)
+            plt.xlim( 0.5, bins[-1]+0.5)
+            plt.ylim( 0, 1)
+        fig = plt.figure(figsize = (4,3))
+        ax  = fig.add_subplot(1,1,1)
+        plt.hist( data , bins = bins, weights= np.zeros_like(data) + 1./data.size,
+                  color = 'lightblue', edgecolor = 'gray')
+        bins_labels(bins, fontsize=9)
 
-        #comparPred = pd.DataFrame( [oY_test.tolist(), oY_pred, Y_pred_thres, temp_accu] ).T
-        #comparPred.columns = ["oY_test", "oY_pred", "Y_pred_thres", "T-F"]
-
-        if display_plot:
-            print("Outer-loop: ", str(ooL+1))
-            plot_metrics( outerMSE.iloc[ooL, :].T.values() , 'MSE', 'min')
-
-    return EvalResults, comparPred, outerMSE, innerMSE
+    return PerfoMetric, comparPred, outerCAL, totalCAL, optimal_nLV
 
 
 
-def binary_classification( Y_measured, Y_predicted, thresVal, Val_Low, Val_High ):
-    # Confront a set of measured events/conditions (Y_measured), against
-    # a set of predicted events/conditions (Y_predicted)
-    # INPUT:
-    # - Y_measured         = experiments or clinical record of events
-    # - Y_predicted        = classification predicted by (PLS) model
-    # - thresVal           = 50% vallue for threshold classification
-    # - Val_Low & Val_High = lowest and highest categories in Y
-    #
+def binary_classification( Y_measured, Y_predicted, P50_thrVal, RespVal_0, RespVal_1 ):
+    # Confront a Series of measured clinical events/conditions (Y_measured),
+    # against a Series of predicted events/conditions (Y_predicted)
     # OUTPUT:
-    # - comparPred         =  DataFrame with the classification results
-    # - TN, TP, FN, FP     = numbers for the T/F Positive and T/F Negative
+    # - comparPred    = DF with test/train/prediction response variable used
+    # - perfo_metrics = Calculated performance metrics of the model
+    #    0 - accuracy ------ tot_N True prediction / tot_N of predictions
+    #    1 - specificity --- TrueNeg / (FalsPos+TrueNeg)    (i.e. test healthy)
+    #    2 - sensitivity --- TruePos / (TruePos+FalsNeg)    (i.e. test sick)
+    #    3 - Best_nLV ------ Best number of latent var. found in oo-th cycle
 
-    # Transform the Y_predicted in categorical values using thresVal cutoff
+    perfo_metrics = pd.DataFrame( 0 , index = ["Accuracy", "Specificity", "Sensitivity", "Best_nLV"] ,
+                                    columns= [ "temp" for xx in range(1)] )
+    # Transform the Y_predicted in categorical values using P50_thrVal cutoff
     threshold_Y = []
     for yn in range(len(Y_predicted)):
-        if Y_predicted[yn] > thresVal:
-            threshold_Y.append( Val_High )
-        elif Y_predicted[yn] <= thresVal:
-            threshold_Y.append( Val_Low )
+        if Y_predicted[yn] > P50_thrVal:
+            threshold_Y.append( RespVal_1 )
+        elif Y_predicted[yn] <= P50_thrVal:
+            threshold_Y.append( RespVal_0 )
 
-    # Find T/F Positive and T/F Negative to calc. Specificity, Sensitivity
+    # Find T/F Positive and T/F Negative to calculate Specificity + Sensitivity
     # True Negat.      True Posit.      False Negat.      False Posit.
     TN = 0;            TP = 0;          FN = 0;           FP = 0;
     for ii in range(len(Y_measured)):
@@ -185,18 +177,27 @@ def binary_classification( Y_measured, Y_predicted, thresVal, Val_Low, Val_High 
         elif Y_measured[ii]==1 and threshold_Y[ii]==1 :      TP +=1
         elif Y_measured[ii]==1 and threshold_Y[ii]==0 :      FN +=1
         elif Y_measured[ii]==0 and threshold_Y[ii]==1 :      FP +=1
-    # Calculate accuracy of modelling with opt_nLV at this ooL-th iteration
-    TF_predict = [ qq == ee for qq,ee in zip( Y_measured, threshold_Y) ]
 
+    # Now calculate performance metrics: ACCU, SPEC, SELE
+    TF_predict = [ qq == ee for qq,ee in zip( Y_measured, threshold_Y) ]
     comparPred = pd.DataFrame( [Y_measured, Y_predicted, threshold_Y, TF_predict] ).T
     comparPred.columns = ["Y_measure", "Y_predict", "Y_thres", "T-F"]
 
-    return comparPred, TN, TP, FN, FP
+    # If numbers are low, then the values of FP/FN/TP/TN are zero. Then,
+    # specificity/Sensitivity cannot be calculated (err: division by zero)
+    perfo_metrics.iloc[0] = (TP+TN) / (TP+TN+FP+FN)
+    if (FP+TN) == 0:     perfo_metrics.iloc[1] = 0
+    else:                perfo_metrics.iloc[1] = TN / (FP+TN)     # Specificity
+    if (TP+FN) == 0:     perfo_metrics.iloc[2] = 0
+    else:                perfo_metrics.iloc[2] = TP / (FN+TP)     # Sensitivity
+
+    return comparPred, perfo_metrics
+
 
 
 def plot_metrics(vals, ylabel, objective, do_mean):
-    # Function to plot an np.array "vals" (either MSE or R2 from cross-valid.
-    # of PLS) and display the min or max value with a cross
+    # Function to plot an np.array "vals" (either ACCU. MSE  or R2 from
+    # validation of PLS) and display the min or max value with a cross
     # vals      = must be an np.array, each column is an individual line
     #             to plot on sequential x positions
     # ylabel    = (str) the name of the plotted y-values (e.g. MSE or R2)
@@ -217,30 +218,23 @@ def plot_metrics(vals, ylabel, objective, do_mean):
         if do_mean:
             yValues     = vals.mean(axis=1)
             std_yValues = vals.std(axis=1)
-            plt.plot( xticks, np.array(yValues), '-.', color='blue', mfc='blue')
+            plt.title('Mean Error in PLS models')
+            plt.plot( xticks, np.array(yValues), '--', color='blue', mfc='blue')
 
             plt.fill_between(xticks, np.array(yValues) - std_yValues,
                                      np.array(yValues) + std_yValues,
-                                     color='lightgray', alpha=0.1)
-            plt.title('Mean Error in PLS models')
-
+                                     color='lightgray', alpha=0.05)
         else:
             yValues = vals[:,ii]
-            plt.plot( xticks, np.array(yValues), '-.', color='blue', mfc='blue')
             plt.title('Error in PLS models')
-
+            plt.plot( xticks, np.array(yValues), '-.', color='blue', mfc='blue')
 
         # Determine minimum and visualize it
-        from scipy.signal import argrelextrema
         if objective == 'min':
-            all_extr = argrelextrema( np.array(yValues) , np.less)[0]
+            #all_extr = argrelextrema( np.array(yValues) , np.less)[0]
+            idx = np.argmin( np.array(yValues))
         else:
-            all_extr = argrelextrema( np.array(yValues) , np.greater)[0]
-
-        # Handle case in which no local extrem point is found. Also, indexes
-        # start at 0, so optimal_nLV must be adjusted (by -1) to plot correctly
-        if all_extr.size == 0 :       idx = len(yValues)-1
-        else:                         idx = all_extr[0]
+            idx = np.argmax( np.array(yValues))
 
         plt.plot(xticks[idx], np.array(yValues)[idx], 'P', ms=10, mfc='red')
 
@@ -249,7 +243,6 @@ def plot_metrics(vals, ylabel, objective, do_mean):
     ax.set_ylabel( ylabel )
     ax.set_xticks( xticks )
     plt.grid(color = "grey", linestyle='--')
-
     plt.show()
 
 
@@ -257,9 +250,6 @@ def plot_metrics(vals, ylabel, objective, do_mean):
 def PLS_fit_model(M_X, M_Y, nLV, RespVar):
     # Perform PLS regression and return the transformed training sample scores
     #
-    # INPUT:
-    #   - M_X    - M_Y    - nLV
-    #   - RespVar   : column name used from M_Y table
     # OUTPUT:
     #   - DF_scores : (DataFrame) with the latent var. scores
     #   - DF_loads  : (DataFrame) with the latent var. loadings
@@ -297,7 +287,6 @@ def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories, transf_01):
     # "categories" in column "RespVar" is True
     #
     # INPUT:
-    #   - RespVar    : column name to use for selection
     #   - categories : is a list of 1+ elements
     #   - transf_01  : if there are only two categories, we can transform them
     #                  into simple binary 0-1 choise (0=min , 1=max)
@@ -349,10 +338,10 @@ def StandardScale_FeatureTable( M_X, idxCol ):
 def RandomSelect_P_TrainTest( M_X, M_Y, uID_colname, proportion ):
     # Create training and test sets for M_X and M_Y, where all samples from one
     # patient are either training or test. Function assume that the two matrices
-    # (M_X and M_Y) are same ordered list of observations
-    import random
+    # (M_X and M_Y) are same ordered list of observations.
 
-    # Create a the unique list of identifiers to use to create the two sets
+    import random
+    # Generate unique list of identifiers to use to create the two sets
     uID_List  = np.unique( M_Y[ uID_colname ].values )
     random.shuffle(uID_List)
 
