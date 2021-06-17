@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+'''
 # ****************************************************************************
 
 # Module contains a collection of functions to:
@@ -10,9 +11,6 @@
 
 # ****************************************************************************
 
-import numpy  as np
-import pandas as pd
-import matplotlib.pyplot as plt
 
 # ****************************************************************************
 
@@ -27,7 +25,11 @@ import matplotlib.pyplot as plt
 # - RespVal_1
 # - P50_thrVal : threshold value (50%) to use to assign predictions to either
 #                RespVal_0 or RespVal_1
+'''
 
+import numpy  as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
 def PLS_ModelPredict( X_train, X_test, Y_train, Y_test, nLV, P50_thrVal, RespVal_0, RespVal_1):
     # The function creates a PLS model with a train data set. Then use test to
@@ -55,6 +57,7 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
                            RespVar, RespVal_0, RespVal_1, P50_thrVal ,
                            outLoop, inLoop, outerPropT2T, innerPropT2T,
                            display_plot):
+    '''
     # Execute a double cross validation for PLR regression.
     #
     # FUNC used:   > RandomSelect_P_TrainTest    > PLS_ModelPredict
@@ -75,7 +78,7 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
     #  - comparPred   : test, train and prediction response variable used for
     #                   last (!) outer loop
     #                   (we need to implement MultiIndex to keep them all)
-
+    '''
     # Initialize empty DataFrames to store results
     totalCAL = pd.DataFrame( [] )
     innerCAL = pd.DataFrame( 0, index   = [ "i"+str(xx+1) for xx in range(inLoop)] ,
@@ -92,29 +95,18 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
         print("Iteration:   : "+str(ooL+1)+" of "+str(outLoop), sep=' ', end='\r', flush=True)
 
         # Split into "outer" training and test sets, based on uniqueID_Col
-        oX_train, oX_test ,oY_train, oY_test, _,_ = RandomSelect_P_TrainTest( M_X, M_Y, uniqueID_Col, outerPropT2T )
-        '''
+        oX_train, oX_test ,oY_train, oY_test = RandomSelect_P_TrainTest( M_X, M_Y, uniqueID_Col, outerPropT2T,
+                                                                         RespVar, [RespVal_0, RespVal_1])
+
         for iiL in range(inLoop):
             # Split outer Train into "inner" training and test sets, based on column uniqueID_Col
-            iX_train, iX_test ,iY_train, iY_test, _,_ = RandomSelect_P_TrainTest( oX_train, oY_train, uniqueID_Col, innerPropT2T )
+            iX_train, iX_test ,iY_train, iY_test = RandomSelect_P_TrainTest( oX_train, oY_train, uniqueID_Col, innerPropT2T,
+                                                                             RespVar, [RespVal_0, RespVal_1] )
             # Take only the response column "RespVar"
             iY_train = iY_train.loc[:, RespVar ]
             iY_test  = iY_test.loc[ :, RespVar ]
 
             for nnLV in range_nLV:         # Create PLS models all range of number of LV
-                iY_pred, tempMetric = PLS_ModelPredict( iX_train, iX_test, iY_train, iY_test,
-                                                        nnLV, P50_thrVal , RespVal_0, RespVal_1)
-                ACCU = tempMetric[0]
-                innerCAL.iloc[ iiL, nnLV-1 ] = ACCU
-        '''
-        for nnLV in range_nLV:         # Create PLS models all range of number of LV
-            for iiL in range(inLoop):
-                # Split outer Train into "inner" training and test sets, based on column uniqueID_Col
-                iX_train, iX_test ,iY_train, iY_test, _,_ = RandomSelect_P_TrainTest( oX_train, oY_train, uniqueID_Col, innerPropT2T )
-                # Take only the response column "RespVar"
-                iY_train = iY_train.loc[:, RespVar ]
-                iY_test  = iY_test.loc[ :, RespVar ]
-
                 iY_pred, tempMetric = PLS_ModelPredict( iX_train, iX_test, iY_train, iY_test,
                                                         nnLV, P50_thrVal , RespVal_0, RespVal_1)
                 ACCU = tempMetric[0]
@@ -162,6 +154,7 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
 
 
 def binary_classification( Y_measured, Y_predicted, P50_thrVal, RespVal_0, RespVal_1 ):
+    '''
     # Confront a Series of measured clinical events/conditions (Y_measured),
     # against a Series of predicted events/conditions (Y_predicted)
     # OUTPUT:
@@ -171,7 +164,7 @@ def binary_classification( Y_measured, Y_predicted, P50_thrVal, RespVal_0, RespV
     #    1 - specificity --- TrueNeg / (FalsPos+TrueNeg)    (i.e. test healthy)
     #    2 - sensitivity --- TruePos / (TruePos+FalsNeg)    (i.e. test sick)
     #    3 - Best_nLV ------ Best number of latent var. found in oo-th cycle
-
+    '''
     perfo_metrics = pd.DataFrame( 0 , index = ["Accuracy", "Specificity", "Sensitivity", "Best_nLV"] ,
                                     columns= [ "temp" for xx in range(1)] )
     # Transform the Y_predicted in categorical values using P50_thrVal cutoff
@@ -209,6 +202,7 @@ def binary_classification( Y_measured, Y_predicted, P50_thrVal, RespVal_0, RespV
 
 
 def plot_metrics(vals, ylabel, objective, do_mean):
+    '''
     # Function to plot an np.array "vals" (either ACCU. MSE  or R2 from
     # validation of PLS) and display the min or max value with a cross
     # vals      = must be an np.array, each column is an individual line
@@ -216,7 +210,7 @@ def plot_metrics(vals, ylabel, objective, do_mean):
     # ylabel    = (str) the name of the plotted y-values (e.g. MSE or R2)
     # objective = (str) highlight minimum or maximum data point ("min" or "max")
     # do_mean   = (T/F) make a mean of the table_data and plot with error-bar
-
+    '''
     import matplotlib.pyplot as plt
 
     x_Npoints = vals.shape[0]
@@ -260,12 +254,13 @@ def plot_metrics(vals, ylabel, objective, do_mean):
 
 
 def PLS_fit_model(M_X, M_Y, nLV, RespVar):
+    '''
     # Perform PLS regression and return the transformed training sample scores
     #
     # OUTPUT:
     #   - DF_scores : (DataFrame) with the latent var. scores
     #   - DF_loads  : (DataFrame) with the latent var. loadings
-
+    '''
     # Define PLS object with nLV components. No scaling is necessary
     # (data was already scaled)
     from sklearn.cross_decomposition import PLSRegression
@@ -292,6 +287,7 @@ def PLS_fit_model(M_X, M_Y, nLV, RespVar):
 
 
 def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories, transf_01):
+    '''
     # The input are two matricex with the same ordered list of observations:
     #  - M_X is the variable matrix
     #  - M_Y is the predictors matrix
@@ -305,7 +301,7 @@ def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories, transf_01):
     #
     # OUTPUT:
     #   - redX , redY:  equivalent DataFrames with reduced number of rows
-
+    '''
     idx = []
     for cc in categories:
         idx = idx + M_Y.index[M_Y[RespVar] == cc].tolist()
@@ -327,10 +323,12 @@ def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories, transf_01):
 
 
 def StandardScale_FeatureTable( M_X, idxCol ):
+    '''
     # Take the variables of predictors DataFrame (M_X) only: idxCol indicate
     # the column separating variables from categorical/informational data.
     # Then, use "StandardScaler" to scale-standardize the features onto a unit
     # scale with mean = 0 and variance = 1    ( z=(x-u)/s )
+    '''
     X_vars = M_X.iloc[ :, idxCol: ].copy()
     X_desc = M_X.iloc[ :, :idxCol ].copy()
 
@@ -347,29 +345,61 @@ def StandardScale_FeatureTable( M_X, idxCol ):
 
 
 
-def RandomSelect_P_TrainTest( M_X, M_Y, uID_colname, proportion ):
-    # Create training and test sets for M_X and M_Y, where all samples from one
-    # patient are either training or test. Function assume that the two matrices
-    # (M_X and M_Y) are same ordered list of observations.
-
+def RandomSelect_P_TrainTest( M_X, M_Y, uID_colname, proportion, RespVar, RespClasses ):
+    '''
+    # Create training and test sets for M_X and M_Y. Moreover, the samples
+    # subset are created to ensure that all classes (RespClasses) in response
+    # variable (RespVar) are selected with the choosen proportion. If we do
+    # not account this when one class is less numerous it can be that the
+    # random selection results in disproportionate representation, skewing
+    # and compromising the calculation of PLS performance accuracy.
+    #
+    # (NOTE : The two matrices are assumed to have same order)
+    # uID_colname = column name with the unique ID, it is assumed to already
+    #               be a unique list (i.e. only one "patient" is present in
+    #               each matrix)
+    '''
     import random
-    # Generate unique list of identifiers to use to create the two sets
-    uID_List  = np.unique( M_Y[ uID_colname ].values )
-    random.shuffle(uID_List)
+    # Initialize indexes storing variables
+    test_pID  = [];        train_pID = [];
 
-    # Find IDs and row position in dataframe
-    test_pID  = random.sample( uID_List.tolist(), round(len(uID_List)*proportion) )
-    test_idx  = np.where( M_Y[uID_colname].isin( test_pID ))[0].tolist()
+    for ii in range(len(RespClasses)) :
+        # Create subsets of pID that all have same class as response variable
+        sub_M_Y = M_Y.loc[ M_Y[RespVar] == RespClasses[ii] , :]
+        # Generate unique list of identifiers to use to create the two sets
+        uID_List  = np.unique( sub_M_Y[ uID_colname ].values )
+        random.shuffle(uID_List)
+        # Collect and store the IDs selected for this subset
+        test_pID.extend(  random.sample( uID_List.tolist(), round(len(uID_List)*proportion)) )
+        train_pID.extend( np.setdiff1d(uID_List, test_pID) )
 
-    train_pID = np.setdiff1d(uID_List, test_pID)
-    train_idx = np.where( M_Y[uID_colname].isin( train_pID ))[0].tolist()
+    # Use "pID" to create Train/Test dataset using the the full matrices
+    mask_train = M_Y[uID_colname].isin( train_pID )
+    mask_test  = M_Y[uID_colname].isin( test_pID )
+    X_train = M_X.loc[ mask_train , :]
+    X_test  = M_X.loc[ mask_test  , :]
+    Y_train = M_Y.loc[ mask_train , :]
+    Y_test  = M_Y.loc[ mask_test  , :]
 
-    X_train = M_X.iloc[ train_idx, : ]
-    X_test  = M_X.iloc[ test_idx,  : ]
-    Y_train = M_Y.iloc[ train_idx, : ]
-    Y_test  = M_Y.iloc[ test_idx,  : ]
+    """
+    # Quick-check to display of the results count and proportion
+    N_train = X_train.shape[0]
+    N_test  = X_test.shape[0]
+    n_train_c1 = sum(Y_train[RespVar] == 0)
+    n_train_c2 = sum(Y_train[RespVar] == 1)
+    n_test_c1 =  sum(Y_test[RespVar] == 0)
+    n_test_c2 =  sum(Y_test[RespVar] == 1)
+    print("Train N:  ", N_train )
+    print("Test N:   ", N_test )
+    print("               |Class 1 | Class 2" )
+    print("Train tot N    | ", n_train_c1, "   |  ", n_train_c2)
+    print("Test  tot N    | ", n_test_c1,  "   |  ", n_test_c2)
+    print("Train rel Prop | ", round(n_train_c1/N_train, 2), " |  ", round(n_train_c2/N_train, 2) )
+    print("Test  rel Prop | ", round(n_test_c1/N_test, 2),   " |  ", round(n_test_c2/N_test, 2) )
+    """
+    return X_train, X_test ,Y_train, Y_test
 
-    return X_train, X_test ,Y_train, Y_test, train_idx, test_idx
+
 
 
 # ****************************************************************************
