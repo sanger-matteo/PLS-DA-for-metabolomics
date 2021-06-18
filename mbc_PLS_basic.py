@@ -256,10 +256,14 @@ def plot_metrics(vals, ylabel, objective, do_mean):
 def PLS_fit_model(M_X, M_Y, nLV, RespVar):
     '''
     # Perform PLS regression and return the transformed training sample scores
-    #
+    # INPUT:
+    #  - nLV : the number of latent variable to model and return as result.
+    #          NOTE: since PLD LV are built progressively from the first and
+    #                orthogonally to each other, increasing LV but does not
+    #                change their scores and loadings, but only add more LV
     # OUTPUT:
-    #   - DF_scores : (DataFrame) with the latent var. scores
-    #   - DF_loads  : (DataFrame) with the latent var. loadings
+    #  - DF_scores : (DataFrame) with the latent var. scores
+    #  - DF_loads  : (DataFrame) with the latent var. loadings
     '''
     # Define PLS object with nLV components. No scaling is necessary
     # (data was already scaled)
@@ -360,6 +364,7 @@ def RandomSelect_P_TrainTest( M_X, M_Y, uID_colname, proportion, RespVar, RespCl
     #               each matrix)
     '''
     import random
+    import math
     # Initialize indexes storing variables
     test_pID  = [];        train_pID = [];
 
@@ -370,7 +375,7 @@ def RandomSelect_P_TrainTest( M_X, M_Y, uID_colname, proportion, RespVar, RespCl
         uID_List  = np.unique( sub_M_Y[ uID_colname ].values )
         random.shuffle(uID_List)
         # Collect and store the IDs selected for this subset
-        test_pID.extend(  random.sample( uID_List.tolist(), round(len(uID_List)*proportion)) )
+        test_pID.extend(  random.sample( uID_List.tolist(), math.ceil(len(uID_List)*proportion)) )
         train_pID.extend( np.setdiff1d(uID_List, test_pID) )
 
     # Use "pID" to create Train/Test dataset using the the full matrices
@@ -383,23 +388,80 @@ def RandomSelect_P_TrainTest( M_X, M_Y, uID_colname, proportion, RespVar, RespCl
 
     """
     # Quick-check to display of the results count and proportion
-    N_train = X_train.shape[0]
-    N_test  = X_test.shape[0]
-    n_train_c1 = sum(Y_train[RespVar] == 0)
-    n_train_c2 = sum(Y_train[RespVar] == 1)
-    n_test_c1 =  sum(Y_test[RespVar] == 0)
-    n_test_c2 =  sum(Y_test[RespVar] == 1)
+    N_train    = X_train.shape[0]
+    N_test     = X_test.shape[0]
+    n_train_c1 = sum(Y_train[RespVar] == RespClasses[0])
+    n_train_c2 = sum(Y_train[RespVar] == RespClasses[1])
+    n_test_c1  =  sum(Y_test[RespVar] == RespClasses[0])
+    n_test_c2  =  sum(Y_test[RespVar] == RespClasses[1])
+    N_class1   = sum(M_Y[RespVar] == RespClasses[0])
+    N_class2   = sum(M_Y[RespVar] == RespClasses[1])
+    print("Total N:  ", M_Y.shape[0] )
+    print("Class 1:  ", N_class1 )
+    print("Class 2:  ", N_class2 )
     print("Train N:  ", N_train )
     print("Test N:   ", N_test )
     print("               |Class 1 | Class 2" )
     print("Train tot N    | ", n_train_c1, "   |  ", n_train_c2)
     print("Test  tot N    | ", n_test_c1,  "   |  ", n_test_c2)
-    print("Train rel Prop | ", round(n_train_c1/N_train, 2), " |  ", round(n_train_c2/N_train, 2) )
-    print("Test  rel Prop | ", round(n_test_c1/N_test, 2),   " |  ", round(n_test_c2/N_test, 2) )
+    print("Train rel Prop | ", round(n_train_c1/N_class1, 2), " |  ", round(n_train_c2/N_class2, 2) )
+    print("Test  rel Prop | ", round(n_test_c1/N_class1, 2),   " |  ", round(n_test_c2/N_class2, 2) )
     """
     return X_train, X_test ,Y_train, Y_test
 
 
+
+# ****************************************************************************
+
+
+def plot_ScoresPLS( x_Scores, M_Y, RespVar, RespClasses, axis):
+    """
+    # Scatter plot for the SCORES  of a PLS model
+    """
+    # Create a table with all that we need for plotting the desired results
+    DF_scores = x_Scores.copy()
+    DF_scores[RespVar] = np.array( M_Y.loc[:,RespVar] )
+
+    # We create a 2D scatter plot, we only need to take the first two latent
+    # variables and the response column (the last). We color each category
+    # (targets) with a unique color
+    plotDF = DF_scores.iloc[:,[0,1,-1]]
+
+    targets = np.sort( M_Y.loc[:,RespVar].unique() )
+    colors  = ['r', 'b']   # 'y', 'c', 'b', 'g'
+
+    # If axis is None, no ax. and fig. must be defined by the function, else ...
+    if axis is None:
+        fig = plt.figure(figsize = (5,5))
+        ax  = fig.add_subplot(1,1,1)
+    else:       # ... we receive from call the ax. where to place the plot
+        ax = axis
+
+    # Plot the PCA in as 2D scatterplot and uniquely  color each flowcell data
+    for target, color in zip(targets,colors):
+        ind_xx = plotDF[RespVar] == target
+        ax.scatter( plotDF.loc[ind_xx, plotDF.columns[0]],
+                    plotDF.loc[ind_xx, plotDF.columns[1]],
+                    c = color,
+                    s = 20)
+
+    ax.set_xlabel('Score on LV 1', fontsize = 14)
+    ax.set_ylabel('Score on LV 2', fontsize = 14)
+    ax.set_title('PLS-DA on '+ RespVar , fontsize = 16)
+    ax.legend(RespClasses )
+
+    # Choose plot axis limit based on max plotted value +15% margin
+    ngLim = round( np.min(plotDF.values.flatten())  * 1.15, 0)
+    psLim = round( np.max(plotDF.values.flatten())  * 1.15, 0)
+    if psLim > abs(ngLim):     nn = psLim
+    else:                      nn = ngLim
+    ax.set_xlim([-nn, nn])
+    ax.set_ylim([-nn, nn])
+
+    # Add gridlines, X and Y-axis at origin, and their style
+    plt.grid(color = "grey", linestyle='dotted')
+    ax.axhline(y=0, linestyle='-', color='grey')
+    ax.axvline(x=0, linestyle='-', color='grey')
 
 
 # ****************************************************************************
