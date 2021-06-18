@@ -133,7 +133,7 @@ def optimise_PLS_CrossVal( M_X, M_Y, Test_nLV, uniqueID_Col,
         PerfoMetric.iloc[3, ooL] = opt_nLV
 
     # Take the most common opt_nLV as overall optimal number of LV
-    optimal_nLV = PerfoMetric.iloc[-1,:].mode()[0]
+    optimal_nLV = int( PerfoMetric.iloc[-1,:].mode()[0] )
 
     if display_plot:
         bins = range(Test_nLV)
@@ -253,7 +253,7 @@ def plot_metrics(vals, ylabel, objective, do_mean):
 
 
 
-def PLS_fit_model(M_X, M_Y, nLV, RespVar):
+def PLS_fit_model(M_X, M_Y, nLV, scaleVars):
     '''
     # Perform PLS regression and return the transformed training sample scores
     # INPUT:
@@ -268,7 +268,7 @@ def PLS_fit_model(M_X, M_Y, nLV, RespVar):
     # Define PLS object with nLV components. No scaling is necessary
     # (data was already scaled)
     from sklearn.cross_decomposition import PLSRegression
-    plsr = PLSRegression(n_components= nLV , scale=False)
+    plsr = PLSRegression(n_components= nLV , scale=scaleVars)
     plsr.fit( M_X, M_Y)
 
     # Store the LV' scores and loadings in DataFrames
@@ -416,21 +416,20 @@ def RandomSelect_P_TrainTest( M_X, M_Y, uID_colname, proportion, RespVar, RespCl
 
 def plot_ScoresPLS( x_Scores, M_Y, RespVar, RespClasses, axis):
     """
-    # Scatter plot for the SCORES  of a PLS model
+    # Scatter plot for the SCORES of a PLS model
     """
-    # Create a table with all that we need for plotting the desired results
+    # Create a table with all that we need for 2D scatter plot of the scores.
+    # We take the first two latent variables and add the RespVar column (-1).
+    # We add the RespVar colum to uniquely color each category, by helping to
+    # perform a  quick masking
     DF_scores = x_Scores.copy()
     DF_scores[RespVar] = np.array( M_Y.loc[:,RespVar] )
-
-    # We create a 2D scatter plot, we only need to take the first two latent
-    # variables and the response column (the last). We color each category
-    # (targets) with a unique color
     plotDF = DF_scores.iloc[:,[0,1,-1]]
 
     targets = np.sort( M_Y.loc[:,RespVar].unique() )
     colors  = ['r', 'b']   # 'y', 'c', 'b', 'g'
 
-    # If axis is None, no ax. and fig. must be defined by the function, else ...
+    # If axis is None, ax. and fig. must be defined by the function, else ...
     if axis is None:
         fig = plt.figure(figsize = (5,5))
         ax  = fig.add_subplot(1,1,1)
@@ -459,9 +458,64 @@ def plot_ScoresPLS( x_Scores, M_Y, RespVar, RespClasses, axis):
     ax.set_ylim([-nn, nn])
 
     # Add gridlines, X and Y-axis at origin, and their style
-    plt.grid(color = "grey", linestyle='dotted')
+    ax.grid(color = "grey", linestyle='dotted')
     ax.axhline(y=0, linestyle='-', color='grey')
     ax.axvline(x=0, linestyle='-', color='grey')
 
 
+# ****************************************************************************
+
+
+def plot_LoadingsPLS( x_Loads, M_Y, RespVar, RespClasses, vars_order, vars_color, nLV, axis):
+    """
+    # Bar plot for the LOADINGS of a PLS model
+    # IF nLV > 1 then the function plots each latent variable loadings up to nLV
+    # as a vertically stacked list of plots
+    # If axis is porvided, then it will plot only the first LV loadings in the
+    # handle-fig position provided by axis
+    """
+    if nLV > x_Loads.shape[1]:
+        print(" ! Error ! --> Cannot plot more loading than provided by x_Load dataset")
+        return
+    elif nLV <=0:
+        print(" ! Error ! --> Number of loadings to plot must be >= 1")
+        return
+
+    # Create a table with all that we need for plotting the desired results
+    plotDF = x_Loads
+    # Reorganize the the DF based on vars_order list
+    plotDF = plotDF.reindex(vars_order)
+
+    # If axis is None, ax. and fig. must be defined by the function,
+    # vertically stack in order of LV value all bar plots, ...
+    if axis is None:
+        fig, axs = plt.subplots( nLV,1,  figsize=(12, 3*nLV) )
+        fig.suptitle('PLS-DA loadings on '+ RespVar , fontsize = 20)
+        if nLV ==1 :
+            axs = [axs]
+    # ... otherwise we get axis where to place the one plot, and we use to
+    # plot only the loadings of the first LV.
+    else:
+        nLV = 1
+        axs = [axis]
+
+    # Plot each nLV scores as barplots
+    x_pos = range(plotDF.shape[0])
+    for nn in range(nLV):
+        axs[nn].bar(x_pos,  plotDF.loc[:, plotDF.columns[nn]] ,  align='center',
+                  color=vars_color,  edgecolor='grey')
+        axs[nn].grid(axis="y", color = "grey", linestyle='dotted')
+        axs[nn].axhline(y=0, linestyle='-', color='grey')
+        axs[nn].set_ylabel('Loads LV '+str(nn+1), fontsize = 12)
+        axs[nn].set_xticks([])
+        axs[nn].set_xticklabels([])
+        # Choose plot axis limit based on max plotted value +15% margin
+        ngLim = round(np.min(plotDF.iloc[:,nn].values)  * 1.10, 1)
+        psLim = round(np.max(plotDF.iloc[:,nn].values)  * 1.10, 1)
+        axs[nn].set_ylim([ngLim, psLim])
+    # Add X labels (variables names) only in bottom plot
+    axs[nn].set_xticks(x_pos)
+    axs[nn].set_xticklabels(vars_order, rotation = 90, fontsize=8)
+
+    plt.show()
 # ****************************************************************************
