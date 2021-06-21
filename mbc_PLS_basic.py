@@ -450,8 +450,8 @@ def plot_ScoresPLS( x_Scores, M_Y, RespVar, RespClasses, axis):
     ax.legend(RespClasses )
 
     # Choose plot axis limit based on max plotted value +15% margin
-    ngLim = round( np.min(plotDF.values.flatten())  * 1.15, 0)
-    psLim = round( np.max(plotDF.values.flatten())  * 1.15, 0)
+    ngLim = round( np.min(plotDF.values.flatten())  * 1.15, 2)
+    psLim = round( np.max(plotDF.values.flatten())  * 1.15, 2)
     if psLim > abs(ngLim):     nn = psLim
     else:                      nn = ngLim
     ax.set_xlim([-nn, nn])
@@ -510,8 +510,8 @@ def plot_LoadingsPLS( x_Loads, M_Y, RespVar, RespClasses, vars_order, vars_color
         axs[nn].set_xticks([])
         axs[nn].set_xticklabels([])
         # Choose plot axis limit based on max plotted value +15% margin
-        ngLim = round(np.min(plotDF.iloc[:,nn].values)  * 1.10, 1)
-        psLim = round(np.max(plotDF.iloc[:,nn].values)  * 1.10, 1)
+        ngLim = round(np.min(plotDF.iloc[:,nn].values)  * 1.15, 2)
+        psLim = round(np.max(plotDF.iloc[:,nn].values)  * 1.15, 2)
         axs[nn].set_ylim([ngLim, psLim])
     # Add X labels (variables names) only in bottom plot
     axs[nn].set_xticks(x_pos)
