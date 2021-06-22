@@ -290,19 +290,18 @@ def PLS_fit_model(M_X, M_Y, nLV, scaleVars):
 
 
 
-def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories, transf_01):
+def OneWaySele_2Tables( M_X, M_Y, RespVar, categories, transf_01):
     '''
-    # The input are two matricex with the same ordered list of observations:
-    #  - M_X is the variable matrix
-    #  - M_Y is the predictors matrix
-    # The function use M_Y to find the index of the rows where the value(s)
-    # "categories" in column "RespVar" is True
+    # Use the column (RespVar) in one matrix (M_Y) to select all observations
+    # (rows) that belong to the selected levels (i.e. "categories" in column
+    # "RespVar" is True). Then with the rows index information generate
+    # sub-matrices of both M_X and M_Y. and return them
+    # Input are two matricex with the same ordered list of observations:
     #
     # INPUT:
     #   - categories : is a list of 1+ elements
     #   - transf_01  : if there are only two categories, we can transform them
     #                  into simple binary 0-1 choise (0=min , 1=max)
-    #
     # OUTPUT:
     #   - redX , redY:  equivalent DataFrames with reduced number of rows
     '''
@@ -323,6 +322,33 @@ def CrossSelect_TwoTables( M_X, M_Y, RespVar, categories, transf_01):
             print(" --- WARNING --- \n Cannot transform response to binary when there are more than 2 categories")
 
     return redX, redY
+
+
+
+def TwoWaySele_2Tables( M_X, M_Y, RespVar, categories, transf_01):
+    '''
+    # Given two tables (M_X, M_Y) having a common "ID" column (RespVar), we find
+    # shared observations based on the "ID" and create and return sub-matrices
+    # that contain the same (ordered) observations.
+    '''
+    redX = M_X.loc[idx,:]
+    redY = M_Y.loc[idx,:]
+
+    return redX, redY
+
+
+
+def Shuffle_ColumnValues( M_Y, RespVar ):
+    '''
+    # Given a table (M_Y) and a column (RespVar), the function will return the
+    # matrix with the column values being randomly shuffled.
+    '''
+    import random
+    shf_Y = M_Y.copy()
+    CompareRes = pd.DataFrame( data = [ shf_Y[RespVar] ]).T
+    random.shuffle(shf_Y[RespVar].values)
+    CompareRes["Shuffled"] = shf_Y[RespVar].values
+    return shf_Y
 
 
 
